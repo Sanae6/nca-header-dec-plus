@@ -20,7 +20,3 @@ export function decryptNcaHeader(key: BufferOrView, header: BufferOrView): Uint8
 
     return new Uint8Array(decBinds.decrypt(key, header));
 }
-
-import { readFileSync } from "fs";
-
-console.log(decryptNcaHeader(Buffer.from("aeaab1ca08adf9bef12991f369e3c567d6881e4e4a6a47a51f6e4877062d542d", "hex"), readFileSync("./7e9570b3e8007f060413111e3ea2f431.cnmt.nca")))
