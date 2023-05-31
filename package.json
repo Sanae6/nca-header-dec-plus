@@ -1,0 +1,22 @@
+{
+  "name": "nca-header-dec",
+  "version": "0.1.0",
+  "description": "",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc && cargo-cp-artifact -nc build/bindings.node -- cargo build --message-format=json-render-diagnostics",
+    "build-debug": "npm run build --",
+    "build-release": "npm run build -- --release",
+    "install": "npm run build-release",
+    "test": "cargo test"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "cargo-cp-artifact": "^0.1"
+  },
+  "dependencies": {
+    "@types/bindings": "^1.5.1",
+    "bindings": "^1.5.0"
+  }
+}
