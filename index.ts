@@ -60,7 +60,7 @@ export function decryptXciEncryptedHeader(key: BufferOrView, iv: BufferOrView, c
     const outArray = new Uint8Array(contents);
     outArray.set(new Uint8Array(contents));
 
-    decBinds.decryptXciHeader(key, iv, outArray);
+    decBinds.decryptXciHeader(key, iv, outBuf);
 
     return outArray;
 }
