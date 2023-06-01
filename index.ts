@@ -56,6 +56,12 @@ export function decryptXciEncryptedHeader(key: BufferOrView, iv: BufferOrView, c
     if (ArrayBuffer.isView(contents))
         contents = sliceHelper(contents);
 
-    decBinds.decryptXciHeader(key, iv, contents);
+    const outBuf = new ArrayBuffer(0x70);
+    const outArray = new Uint8Array(contents);
+    outArray.set(new Uint8Array(contents));
+
+    decBinds.decryptXciHeader(key, iv, outArray);
+
+    return outArray;
 }
 

@@ -68,9 +68,16 @@ fn decrypt_xci_enc_header(mut cx: FunctionContext) -> JsResult<JsUndefined> {
     iv_buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(1)?.as_slice(&cx));
     let contents = cx.argument::<JsArrayBuffer>(2)?.as_mut_slice(&mut cx);
 
+    type CbcBlock = cbc::cipher::Block<Aes128CbcDec>;
 
+    let iter = contents
+        .chunks_mut(0x10)
+        .map(|c| CbcBlock::from_mut_slice(c));
     let mut cbc = Aes128CbcDec::new((&key_buffer).into(), (&iv_buffer).into());
-    cbc.decrypt_block_mut((contents).into());
+
+    for chunk in iter {
+        cbc.decrypt_block_mut(chunk);
+    }
 
     Ok(cx.undefined())
 }
