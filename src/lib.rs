@@ -1,8 +1,12 @@
 use aes::{Aes128, cipher::generic_array::GenericArray, cipher::KeyInit};
+use aes::cipher::KeyIvInit;
 use ecb::cipher::BlockDecryptMut;
 use neon::prelude::*;
 use neon::types::buffer::TypedArray;
 use xts_mode::Xts128;
+
+type Aes128EcbDec = ecb::Decryptor<Aes128>;
+type Aes128CbcDec = cbc::Decryptor<Aes128>;
 
 pub fn get_nintendo_tweak(sector_index: u128) -> [u8; 0x10] {
     sector_index.to_be_bytes()
@@ -36,8 +40,6 @@ fn decrypt_nca_header(mut cx: FunctionContext) -> JsResult<JsArrayBuffer> {
     Ok(output_buffer)
 }
 
-type Aes128EcbDec = ecb::Decryptor<aes::Aes128>;
-
 fn decrypt_nca_area(mut cx: FunctionContext) -> JsResult<JsArrayBuffer> {
     let mut key_buffer = [0; 0x10];
     key_buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(0)?.as_slice(&cx));
@@ -59,9 +61,23 @@ fn decrypt_nca_area(mut cx: FunctionContext) -> JsResult<JsArrayBuffer> {
     Ok(output_buffer)
 }
 
+fn decrypt_xci_enc_header(mut cx: FunctionContext) -> JsResult<JsUndefined> {
+    let mut key_buffer = [0; 0x10];
+    key_buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(0)?.as_slice(&cx));
+    let mut iv_buffer = [0; 0x10];
+    iv_buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(1)?.as_slice(&cx));
+    let contents = cx.argument::<JsArrayBuffer>(2)?.as_mut_slice(&mut cx);
+
+
+    let mut cbc = Aes128CbcDec::new((&key_buffer).into(), (&iv_buffer).into());
+    cbc.decrypt_block_mut((contents).into());
+
+    Ok(cx.undefined())
+}
 #[neon::main]
 fn main(mut cx: ModuleContext) -> NeonResult<()> {
     cx.export_function("decryptHeader", decrypt_nca_header)?;
     cx.export_function("decryptArea", decrypt_nca_area)?;
+    cx.export_function("decryptXciHeader", decrypt_xci_enc_header)?;
     Ok(())
 }
