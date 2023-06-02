@@ -1,5 +1,9 @@
+use std::cell::RefCell;
+
 use aes::{Aes128, cipher::generic_array::GenericArray, cipher::KeyInit};
 use aes::cipher::KeyIvInit;
+use ctr::cipher::{StreamCipher, StreamCipherSeek};
+use ctr::Ctr128LE;
 use ecb::cipher::BlockDecryptMut;
 use neon::prelude::*;
 use neon::types::buffer::TypedArray;
@@ -7,6 +11,7 @@ use xts_mode::Xts128;
 
 type Aes128EcbDec = ecb::Decryptor<Aes128>;
 type Aes128CbcDec = cbc::Decryptor<Aes128>;
+type Aes128CtrDec = ctr::Ctr128LE<Aes128>;
 
 pub fn get_nintendo_tweak(sector_index: u128) -> [u8; 0x10] {
     sector_index.to_be_bytes()
@@ -47,7 +52,6 @@ fn decrypt_nca_area(mut cx: FunctionContext) -> JsResult<JsArrayBuffer> {
     let slice = buffer.as_slice(&mut cx);
     // let buffer = cx.argument::<JsArrayBuffer>(2)?;
 
-    println!("SLice len {}", slice.len());
     let mut ecb = Aes128EcbDec::new(&key_buffer.into());
     let mut out_slice = [0; 0x10];
     ecb.decrypt_block_b2b_mut(slice.into(), (&mut out_slice).into());
@@ -59,13 +63,6 @@ fn decrypt_nca_area(mut cx: FunctionContext) -> JsResult<JsArrayBuffer> {
     let mut output_buffer = cx.array_buffer(0x10)?;
     output_buffer.as_mut_slice(&mut cx).copy_from_slice(&out_slice);
     Ok(output_buffer)
-}
-
-struct XtsWrapper(Xts128<Aes128>);
-impl Finalize for XtsWrapper {
-    fn finalize<'a, C: Context<'a>>(self, _: &mut C) {
-        // don't particularly need to do anything
-    }
 }
 
 fn decrypt_xci_enc_header(mut cx: FunctionContext) -> JsResult<JsArrayBuffer> {
@@ -94,24 +91,63 @@ fn decrypt_xci_enc_header(mut cx: FunctionContext) -> JsResult<JsArrayBuffer> {
     Ok(output_buffer)
 }
 
-// fn create_dec_xts(mut cx: FunctionContext) -> JsResult<JsBox<XtsWrapper>> {
-//     let mut key_buffer = [0; 0x20];
-//     key_buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(0)?.as_slice(&cx));
+struct XtsWrapper(Xts128<Aes128>);
+impl Finalize for XtsWrapper {
+    fn finalize<'a, C: Context<'a>>(self, _: &mut C) {
+        // don't particularly need to do anything
+    }
+}
+
+fn create_dec_xts(mut cx: FunctionContext) -> JsResult<JsBox<XtsWrapper>> {
+    let mut key_buffer = [0; 0x20];
+    key_buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(0)?.as_slice(&cx));
+
+    let cipher_1 = Aes128::new(GenericArray::from_slice(&key_buffer[..0x10]));
+    let cipher_2 = Aes128::new(GenericArray::from_slice(&key_buffer[0x10..]));
+
+    let xts = XtsWrapper(Xts128::new(cipher_1, cipher_2));
+    let b = cx.boxed(xts);
+    let decrypt = JsFunction::new(&mut cx, |mut cx| {
+        let mut buffer = [0u8; 0x10];
+        buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(0)?.as_slice(&cx));
+
+        let mut out = cx.array_buffer(0x10)?;
+        out.as_mut_slice(&mut cx).copy_from_slice(&mut buffer);
+        Ok(cx.undefined())
+    })?;
+    b.set(&mut cx, "decrypt", decrypt)?;
+    Ok(b)
+}
+
+struct CtrWrapper([u8; 0x10], [u8; 0x10]);
+impl CtrWrapper {
+    fn read(&mut self, offset: u64, buffer: &mut [u8]) {
+    }
+}
+impl Finalize for CtrWrapper {
+    fn finalize<'a, C: Context<'a>>(self, _: &mut C) {
+        // don't particularly need to do anything
+    }
+}
+
+fn dec_ctr_read(mut cx: FunctionContext) -> JsResult<JsArrayBuffer> {
+    let mut key_buffer = [0; 0x10];
+    key_buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(0)?.as_slice(&cx));
+    let mut iv_buffer = [0; 0x10];
+    iv_buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(1)?.as_slice(&cx));
+    let mut out = cx.argument::<JsArrayBuffer>(2)?;
+
+    let mut a = Aes128CtrDec::new(&key_buffer.into(), &iv_buffer.into());
+    a.apply_keystream(out.as_mut_slice(&mut cx));
+
+    Ok(out)
+}
+
+// fn create_dec_ctr(mut cx: FunctionContext) -> JsResult<JsBox<RefCell<CtrWrapper>>> {
 //
-//     let cipher_1 = Aes128::new(GenericArray::from_slice(&key_buffer[..0x10]));
-//     let cipher_2 = Aes128::new(GenericArray::from_slice(&key_buffer[0x10..]));
-//
-//     let xts = XtsWrapper(Xts128::new(cipher_1, cipher_2));
-//     let b = cx.boxed(xts);
-//     let func = JsFunction::new(&mut cx, |mut cx| {
-//
-//         Ok(cx.undefined())
-//     })?;
-//     b.set(&mut cx, cx.string("decrypt"), )?;
+//     let iv_buffer = [0; 0x10];
+//     let b = cx.boxed(RefCell::new(CtrWrapper(a)));
 //     Ok(b)
-// }
-// fn decrypt_aes_generic() {
-//
 // }
 
 #[neon::main]
@@ -119,5 +155,8 @@ fn main(mut cx: ModuleContext) -> NeonResult<()> {
     cx.export_function("decryptHeader", decrypt_nca_header)?;
     cx.export_function("decryptArea", decrypt_nca_area)?;
     cx.export_function("decryptXciHeader", decrypt_xci_enc_header)?;
+    // cx.export_function("createDecXts", create_dec_xts)?;
+    // cx.export_function("createDecCtr", create_dec_ctr)?;
+    cx.export_function("decCtrRead", dec_ctr_read)?;
     Ok(())
 }
