@@ -72,6 +72,9 @@ export function createXts(key: BufferOrView) {
 class CtrWrapper implements Queryable {
     private iv = new ArrayBuffer(0x10);
     private ctr = new Uint8Array(this.iv);
+    private sectorOffset = 0n;
+    private currentSeek = 0n;
+
     constructor(
         private key: ArrayBufferLike,
         private base: Queryable,
@@ -81,20 +84,40 @@ class CtrWrapper implements Queryable {
         return this.base.size;
     }
 
-    updateIv(offset: bigint) {
+    private updateIv(offset: bigint) {
+        console.log("Offset-2 0x", offset.toString(16));
         offset >>= 4n;
+        console.log("Offset-1 0x", offset.toString(16), this.ctr.buffer);
         for (let j = 0; j < 0x8; j++) {
             this.ctr[0x10-j-1] = Number(offset & 0xFFn);
             offset >>= 8n;
+            console.log("Offset" + j + " 0x", offset.toString(16), this.ctr.buffer);
         }
     }
 
+    private seek(offset: bigint) {
+        this.currentSeek = offset & ~0xFn;
+        this.sectorOffset = offset & 0xFn;
+        this.updateIv(offset);
+    }
+
     async read(offset: number, size: number): Promise<DataView> {
-        const view = await this.base.read(offset, size);
-        this.updateIv(BigInt(offset));
-        const s = decBinds.decCtrRead(this.key, this.iv, sliceHelper(view));
-        console.log(`s${s}`);
-        return new DataView(s);
+        this.seek(BigInt(offset));
+
+        const encryptedData = await this.base.read(offset, size);
+
+        if (this.sectorOffset === 0n) {
+            const r = decBinds.decCtrRead(this.key, this.iv, sliceHelper(encryptedData));
+
+            return new DataView(r);
+        }
+
+        const blockBuf = Buffer.alloc(0x10);
+
+        throw new Error("Non-zero sectorOffset: " + this.sectorOffset);
+
+        // this.updateCtr(BigInt(offset));
+        // return new DataView(decBinds.decCtrRead(this.key, this.iv, sliceHelper(view)));
     }
 }
 
@@ -109,10 +132,10 @@ export function createCtr(key: BufferOrView, queryable: Queryable) {
 
 import {readFileSync, writeFileSync} from "fs";
 
-const file = sliceHelper(readFileSync("./encryptedContents"));
+const file = sliceHelper(readFileSync("./test.nca"));
 
 const ctr = createCtr(
-    Buffer.from("ac31f3da4bd7c4a56116789b748cdf1f", "hex"),
+    Buffer.from("AC31F3DA4BD7C4A56116789B748CDF1F", "hex"),
     {
         read(offset: number, size: number): Promise<DataView> {
             return new Promise((res) => res(new DataView(file, offset, size)))
@@ -121,10 +144,7 @@ const ctr = createCtr(
     }
 );
 
-
-console.log(
-    ctr.read(0, file.byteLength).then(b => writeFileSync("nca.bin", b))
-);
+ctr.read(0xC00, file.byteLength - 0xC00).then(b => writeFileSync("nca.bin", b))
 
 export interface Queryable {
     read(offset: number, size: number): Promise<DataView>;
