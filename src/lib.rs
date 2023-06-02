@@ -61,16 +61,26 @@ fn decrypt_nca_area(mut cx: FunctionContext) -> JsResult<JsArrayBuffer> {
     Ok(output_buffer)
 }
 
-fn decrypt_xci_enc_header(mut cx: FunctionContext) -> JsResult<JsUndefined> {
+struct XtsWrapper(Xts128<Aes128>);
+impl Finalize for XtsWrapper {
+    fn finalize<'a, C: Context<'a>>(self, _: &mut C) {
+        // don't particularly need to do anything
+    }
+}
+
+fn decrypt_xci_enc_header(mut cx: FunctionContext) -> JsResult<JsArrayBuffer> {
     let mut key_buffer = [0; 0x10];
     key_buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(0)?.as_slice(&cx));
     let mut iv_buffer = [0; 0x10];
     iv_buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(1)?.as_slice(&cx));
     let contents = cx.argument::<JsArrayBuffer>(2)?.as_mut_slice(&mut cx);
+    let mut buffer = [0; 0x70];
+
+    buffer.copy_from_slice(contents);
 
     type CbcBlock = cbc::cipher::Block<Aes128CbcDec>;
 
-    let iter = contents
+    let iter = buffer
         .chunks_mut(0x10)
         .map(|c| CbcBlock::from_mut_slice(c));
     let mut cbc = Aes128CbcDec::new((&key_buffer).into(), (&iv_buffer).into());
@@ -79,8 +89,31 @@ fn decrypt_xci_enc_header(mut cx: FunctionContext) -> JsResult<JsUndefined> {
         cbc.decrypt_block_mut(chunk);
     }
 
-    Ok(cx.undefined())
+    let mut output_buffer = cx.array_buffer(0x70)?;
+    output_buffer.as_mut_slice(&mut cx).copy_from_slice(&buffer);
+    Ok(output_buffer)
 }
+
+// fn create_dec_xts(mut cx: FunctionContext) -> JsResult<JsBox<XtsWrapper>> {
+//     let mut key_buffer = [0; 0x20];
+//     key_buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(0)?.as_slice(&cx));
+//
+//     let cipher_1 = Aes128::new(GenericArray::from_slice(&key_buffer[..0x10]));
+//     let cipher_2 = Aes128::new(GenericArray::from_slice(&key_buffer[0x10..]));
+//
+//     let xts = XtsWrapper(Xts128::new(cipher_1, cipher_2));
+//     let b = cx.boxed(xts);
+//     let func = JsFunction::new(&mut cx, |mut cx| {
+//
+//         Ok(cx.undefined())
+//     })?;
+//     b.set(&mut cx, cx.string("decrypt"), )?;
+//     Ok(b)
+// }
+// fn decrypt_aes_generic() {
+//
+// }
+
 #[neon::main]
 fn main(mut cx: ModuleContext) -> NeonResult<()> {
     cx.export_function("decryptHeader", decrypt_nca_header)?;

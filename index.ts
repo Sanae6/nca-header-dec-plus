@@ -9,7 +9,7 @@ function sliceHelper(view: ArrayBufferView, length?: number) {
 const decBinds: {
     decryptHeader(key: ArrayBufferLike, header: ArrayBufferLike): ArrayBuffer,
     decryptArea(key: ArrayBufferLike, chunk: ArrayBufferLike): ArrayBuffer
-    decryptXciHeader(key: ArrayBufferLike, iv: ArrayBufferLike, contents: ArrayBufferLike): void;
+    decryptXciHeader(key: ArrayBufferLike, iv: ArrayBufferLike, contents: ArrayBufferLike): ArrayBuffer;
 } = bindings({});
 
 export function decryptNcaHeader(key: BufferOrView, header: BufferOrView): Uint8Array {
@@ -56,12 +56,26 @@ export function decryptXciEncryptedHeader(key: BufferOrView, iv: BufferOrView, c
     if (ArrayBuffer.isView(contents))
         contents = sliceHelper(contents);
 
-    const outBuf = new ArrayBuffer(0x70);
-    const outArray = new Uint8Array(contents);
-    outArray.set(new Uint8Array(contents));
-
-    decBinds.decryptXciHeader(key, iv, outBuf);
-
-    return outArray;
+    return new Uint8Array(decBinds.decryptXciHeader(key, iv, contents));
 }
 
+
+
+// export interface Queryable {
+//     read(offset: number, size: number): Promise<DataView>;
+//
+//     size: number;
+// }
+// class CtrContentArchiveEntryDecryptionContext implements Queryable {
+//     constructor(
+//         private queryable: Queryable,
+//         key: BufferOrView,
+//     ) {
+//     }
+//
+//     read(offset: number, size: number): Promise<DataView> | DataView {
+//
+//     }
+//
+//     size: number = 0;
+// }
