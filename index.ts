@@ -130,21 +130,21 @@ export function createCtr(key: BufferOrView, queryable: Queryable) {
     return new CtrWrapper(key, queryable);
 }
 
-import {readFileSync, writeFileSync} from "fs";
+// import {readFileSync, writeFileSync} from "fs";
 
-const file = sliceHelper(readFileSync("./test.nca"));
+// const file = sliceHelper(readFileSync("./test.nca"));
 
-const ctr = createCtr(
-    Buffer.from("AC31F3DA4BD7C4A56116789B748CDF1F", "hex"),
-    {
-        read(offset: number, size: number): Promise<DataView> {
-            return new Promise((res) => res(new DataView(file, offset, size)))
-        },
-        size: 0
-    }
-);
+// const ctr = createCtr(
+//     Buffer.from("AC31F3DA4BD7C4A56116789B748CDF1F", "hex"),
+//     {
+//         read(offset: number, size: number): Promise<DataView> {
+//             return new Promise((res) => res(new DataView(file, offset, size)))
+//         },
+//         size: 0
+//     }
+// );
 
-ctr.read(0xC00, file.byteLength - 0xC00).then(b => writeFileSync("nca.bin", b))
+// ctr.read(0xC00, file.byteLength - 0xC00).then(b => writeFileSync("nca.bin", b))
 
 export interface Queryable {
     read(offset: number, size: number): Promise<DataView>;
