@@ -1,7 +1,9 @@
 use std::cell::RefCell;
+use std::ops::{Deref, Div};
 
 use aes::{Aes128, cipher::generic_array::GenericArray, cipher::KeyInit};
 use aes::cipher::KeyIvInit;
+use bytemuck::{cast_slice, cast_slice_mut};
 use ctr::cipher::{StreamCipher, StreamCipherSeek};
 use ctr::Ctr128LE;
 use ecb::cipher::BlockDecryptMut;
@@ -55,10 +57,6 @@ fn decrypt_nca_area(mut cx: FunctionContext) -> JsResult<JsArrayBuffer> {
     let mut ecb = Aes128EcbDec::new(&key_buffer.into());
     let mut out_slice = [0; 0x10];
     ecb.decrypt_block_b2b_mut(slice.into(), (&mut out_slice).into());
-    // for s in slice.chunks_mut(0x10) {
-    //     println!("test {:02X?}", s);
-    //     ecb.decrypt_block_mut(s.into());
-    // }
 
     let mut output_buffer = cx.array_buffer(0x10)?;
     output_buffer.as_mut_slice(&mut cx).copy_from_slice(&out_slice);
@@ -92,6 +90,7 @@ fn decrypt_xci_enc_header(mut cx: FunctionContext) -> JsResult<JsArrayBuffer> {
 }
 
 struct XtsWrapper(Xts128<Aes128>);
+
 impl Finalize for XtsWrapper {
     fn finalize<'a, C: Context<'a>>(self, _: &mut C) {
         // don't particularly need to do anything
@@ -119,36 +118,65 @@ fn create_dec_xts(mut cx: FunctionContext) -> JsResult<JsBox<XtsWrapper>> {
     Ok(b)
 }
 
-struct CtrWrapper([u8; 0x10], [u8; 0x10]);
+struct CtrWrapper {
+    key: [u8; 0x10],
+    counter: [u8; 0x10],
+}
+
 impl CtrWrapper {
-    fn read(&mut self, offset: u64, buffer: &mut [u8]) {
+    fn update_counter(&mut self, offset: u64) {
+        let mut off = offset >> 4;
+        for j in 0..7 {
+            self.counter[0x10 - j - 1] = (off & 0xFF) as u8;
+            off >>= 8;
+        }
+    }
+
+    fn read(&mut self, offset: u64, in_buffer: &mut [u8]) {
+        let len = in_buffer.len();
+        let iter = in_buffer.chunks_mut(0x10)
+            .zip(0..(len / 0x10));
+
+        for (chunk, i) in iter {
+            self.update_counter(offset + (i * 0x10) as u64);
+            let mut ctr = Aes128CtrDec::new(&self.key.into(), &self.counter.into());
+            ctr.apply_keystream(chunk);
+        };
     }
 }
+
 impl Finalize for CtrWrapper {
     fn finalize<'a, C: Context<'a>>(self, _: &mut C) {
         // don't particularly need to do anything
     }
 }
 
-fn dec_ctr_read(mut cx: FunctionContext) -> JsResult<JsArrayBuffer> {
-    let mut key_buffer = [0; 0x10];
-    key_buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(0)?.as_slice(&cx));
-    let mut iv_buffer = [0; 0x10];
-    iv_buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(1)?.as_slice(&cx));
-    let mut out = cx.argument::<JsArrayBuffer>(2)?;
+fn dec_ctr_read(mut cx: FunctionContext) -> JsResult<JsUndefined> {
+    let cell = cx.argument::<JsBox<RefCell<CtrWrapper>>>(0)?;
+    let offset = cx.argument::<JsNumber>(1)?.value(&mut cx) as u64;
+    let mut wrapper = cell.borrow_mut();
 
-    let mut a = Aes128CtrDec::new(&key_buffer.into(), &iv_buffer.into());
-    a.apply_keystream(out.as_mut_slice(&mut cx));
+    let mut in_buffer = cx.argument::<JsArrayBuffer>(2)?;
 
-    Ok(out)
+    let in_buffer_slice = in_buffer.as_mut_slice(&mut cx);
+    wrapper.read(offset, in_buffer_slice);
+
+    Ok(cx.undefined())
 }
 
-// fn create_dec_ctr(mut cx: FunctionContext) -> JsResult<JsBox<RefCell<CtrWrapper>>> {
-//
-//     let iv_buffer = [0; 0x10];
-//     let b = cx.boxed(RefCell::new(CtrWrapper(a)));
-//     Ok(b)
-// }
+fn create_dec_ctr(mut cx: FunctionContext) -> JsResult<JsBox<RefCell<CtrWrapper>>> {
+    let mut key_buffer = [0; 0x10];
+    key_buffer.copy_from_slice(cx.argument::<JsArrayBuffer>(0)?.as_slice(&cx));
+    let mut counter = [0; 0x10];
+    counter[..8].copy_from_slice(cx.argument::<JsArrayBuffer>(1)?.as_slice(&cx));
+    let mut offset = cx.argument::<JsNumber>(2)?.value(&mut cx) as u64;
+    counter[8..].copy_from_slice(&(offset >> 4).to_be_bytes());
+    let b = cx.boxed(RefCell::new(CtrWrapper {
+        key: key_buffer.clone(),
+        counter,
+    }));
+    Ok(b)
+}
 
 #[neon::main]
 fn main(mut cx: ModuleContext) -> NeonResult<()> {
@@ -156,7 +184,7 @@ fn main(mut cx: ModuleContext) -> NeonResult<()> {
     cx.export_function("decryptArea", decrypt_nca_area)?;
     cx.export_function("decryptXciHeader", decrypt_xci_enc_header)?;
     // cx.export_function("createDecXts", create_dec_xts)?;
-    // cx.export_function("createDecCtr", create_dec_ctr)?;
+    cx.export_function("createDecCtr", create_dec_ctr)?;
     cx.export_function("decCtrRead", dec_ctr_read)?;
     Ok(())
 }
